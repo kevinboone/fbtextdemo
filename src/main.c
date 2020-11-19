@@ -160,7 +160,7 @@ void face_draw_char_on_fb (FT_Face face, FrameBuffer *fb,
   //  zero. We should really check for this, and substitute a default
   //  glyph. Naturally, the TTF font chosen must contain glyphs for
   //  all the characters to be displayed. 
-  FT_UInt gi = FT_Get_Char_Index(face, c);
+  FT_UInt gi = FT_Get_Char_Index (face, c);
 
   // Loading the glyph makes metrics data available
   FT_Load_Glyph (face, gi, FT_LOAD_DEFAULT);
@@ -263,7 +263,7 @@ void face_get_char_extent (const FT_Face face, int c, int *x, int *y)
   FT_UInt gi = FT_Get_Char_Index(face, c);
 
   // Loading the glyph makes metrics data available
-  FT_Load_Glyph (face, gi, FT_LOAD_DEFAULT);
+  FT_Load_Glyph (face, gi, FT_LOAD_NO_BITMAP);
 
   *y = face_get_line_spacing (face);
   *x = face->glyph->metrics.horiAdvance / 64;

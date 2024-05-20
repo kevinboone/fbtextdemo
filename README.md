@@ -124,9 +124,6 @@ I don't have access to any Linux device that has any other kind of
 framebuffer. If somebody wants to provide me with one for testing
 purposes, be my guest. 
 
-The utility cannot at present handle multi-byte characters, even if
-you select a font file that has the correct glyphs. 
-
 Although `fbtextdemo` can render onto the existing contents of the
 framebuffer, it won't anti-alias properly if the background is anything
 other than black. It wouldn't be difficult to merge the rendered 

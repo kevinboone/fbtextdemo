@@ -28,6 +28,18 @@
 
 #define FBDEV "/dev/fb0"
 
+
+/*===========================================================================
+  WordGlyphs
+
+  Structure to contain a word represented as its glyphs.
+=========================================================================*/
+typedef struct {
+    UTF32 *word32;
+    int x_extent;
+    int y_extent;
+} WordGlyphs;
+
 /*===========================================================================
 
   init_ft 
@@ -391,6 +403,55 @@ UTF32 *utf8_to_utf32(const UTF8 *utf8_word)
 
 /*===========================================================================
 
+  draw_word_glyphs
+
+  Draws a sequence of word glyphs onto the framebuffer. If the width of the
+  text exceeds the specified bounds, creates a new line until all words have
+  been written.
+  =========================================================================*/
+void draw_word_glyphs(void *face, void *fb, int init_x, int init_y, int width, int height, int word_count, WordGlyphs *word_glyps) {
+    // Let's work out how wide a single space is in the current face, so we
+	  // don't have to keep recalculating it.
+	  int space_y;
+	  int space_x; // Pixel width of a space
+
+    // A string representating a single space in UTF32 format.
+    static const UTF32 utf32_space[2] = {' ', 0};
+	  face_get_string_extent(face, utf32_space, &space_x, &space_y);
+
+    log_debug("Obtained a face whose space has height %d px", space_y);
+	  log_debug("Line spacing is %d px", face_get_line_spacing (face));
+
+	  // x and y are the current coordinates of the top-left corner of the
+	  // bounding box of the text being written, relative to the TL corner of the
+	  // screen.
+    int x = init_x;
+    int y = init_y;
+    log_debug("Starting drawing at %d,%d", x, y);
+    int line_spacing = face_get_line_spacing(face);
+
+    for (int curr_word_idx = 0; curr_word_idx < word_count; curr_word_idx++) {
+        int x_extent = word_glyps[curr_word_idx].x_extent;
+        int x_advance = x_extent + space_x;
+        log_debug("Word width is %d px; would advance X position by %d", x_extent, x_advance);
+
+        // If the text won't fit, move down to the next line
+        if (x + x_advance > width) {
+            log_debug("Text too large for bounds -- move to next line");
+            x = init_x;
+            y += line_spacing;
+        }
+        // If we're already below the specified height, don't write anything.
+        if (y + line_spacing < init_y + height) {
+            face_draw_string_on_fb(face, fb, word_glyps[curr_word_idx].word32, &x, y);
+            face_draw_string_on_fb(face, fb, (UTF32 *)L" ", &x, y); // Single space in UTF32
+        }
+        free(word_glyps[curr_word_idx].word32);
+    }
+}
+
+/*===========================================================================
+
   usage
 
   Show a usage message
@@ -419,9 +480,6 @@ void usage (const char *argv0)
   =========================================================================*/
 int main (int argc, char **argv)
   {
-  // A string representating a single space in UTF32 format
-  static const UTF32 utf32_space[2] = {' ', 0};
-
   // Variables set from the command line
 
   int init_x = 5;
@@ -561,36 +619,11 @@ int main (int argc, char **argv)
 	  if (clear)
 	    framebuffer_clear (fb);
 
-	  // Let's work out how wide a single space is in the current face, so we
-	  //  don't have to keep recalculating it.
-	  int space_y;
-	  int space_x; // Pixel width of a space
-	  face_get_string_extent (face, utf32_space, &space_x, &space_y); 
-
-          log_debug ("Obtained a face whose space has height %d px", space_y);
-	  log_debug ("Line spacing is %d px", face_get_line_spacing (face));
-
-	  // x and y are the current coordinates of the top-left corner of
-	  //  the bounding box of the text being written, relative to the
-	  //  TL corner of the screen.
-	  int x = init_x;
-	  int y = init_y;
-
-          log_debug ("Starting drawing at %d,%d", x, y);
-	  int line_spacing = face_get_line_spacing (face);
-
-    // Define a structure to save the word as glyhps.
-    typedef struct {
-        UTF32 *word32;
-        int x_extent;
-        int y_extent;
-    } WordGlyphs;
-
     // Allocate memory for the array of word as glyphs.
     int word_count = argc - (optind + 1);
-    WordGlyphs *words_glyps = (WordGlyphs *)malloc(word_count * sizeof(WordGlyphs));
-    if (words_glyps == NULL) {
-        fprintf(stderr, "Cannot allocate memory for the words glyps.\n");
+    WordGlyphs *word_glyps = (WordGlyphs *)malloc(word_count * sizeof(WordGlyphs));
+    if (word_glyps == NULL) {
+        fprintf(stderr, "Cannot allocate memory for the word glyps.\n");
         return 1;
     }
 
@@ -611,32 +644,14 @@ int main (int argc, char **argv)
 	    face_get_string_extent(face, word32, &x_extent, &y_extent);
 
       // Save the word32 and extents in the structure
-      words_glyps[curr_word_idx].word32 = word32;
-      words_glyps[curr_word_idx].x_extent = x_extent;
-      words_glyps[curr_word_idx].y_extent = y_extent;
+      word_glyps[curr_word_idx].word32 = word32;
+      word_glyps[curr_word_idx].x_extent = x_extent;
+      word_glyps[curr_word_idx].y_extent = y_extent;
       curr_word_idx++;
     }
 
-    for (int curr_word_idx = 0; curr_word_idx < word_count; curr_word_idx++) {
-      int x_extent = words_glyps[curr_word_idx].x_extent;
-      int x_advance = x_extent + space_x;
-            log_debug ("Word width is %d px; would advance X position by %d", x_extent, x_advance);
-
-      // If the text won't fit, move down to the next line
-      if (x + x_advance > width)
-        {
-              log_debug ("Text too large for bonuds -- move to next line");
-        x = init_x;
-        y += line_spacing;
-        }
-      // If we're already below the specified height, don't write anything
-      if (y + line_spacing < init_y + height)
-        {
-        face_draw_string_on_fb (face, fb, words_glyps[curr_word_idx].word32, &x, y);
-        face_draw_string_on_fb (face, fb, utf32_space, &x, y);
-        }
-      free (words_glyps[curr_word_idx].word32);
-      }
+    draw_word_glyphs(face, fb, init_x, init_y, width, height, word_count, word_glyps);
+    free(word_glyps);
 	  done_ft (ft);
   }
 	else

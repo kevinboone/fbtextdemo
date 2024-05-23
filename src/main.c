@@ -19,6 +19,7 @@
   =========================================================================*/
 #include <stdio.h>
 #include <assert.h>
+#include <stdbool.h>
 #include <freetype2/ft2build.h>
 #include <freetype/freetype.h>
 #include <getopt.h>
@@ -39,6 +40,29 @@ typedef struct {
     int x_extent;
     int y_extent;
 } WordGlyphs;
+
+/*===========================================================================
+  GlyphsLine
+
+  Structure to contain a sequence of glyphs belonging to a line.
+=========================================================================*/
+typedef struct {
+    UTF32 **word32;
+    int y_position;
+    int word_count;
+} GlyphsLine;
+
+/*===========================================================================
+  GlyphsBoundary
+
+  Structure representing the boundary of a group of glyphs.
+=========================================================================*/
+typedef struct {
+    int init_x;
+    int init_y;
+    int width;
+    int height;
+} GlyphsBoundary;
 
 /*===========================================================================
 
@@ -403,13 +427,133 @@ UTF32 *utf8_to_utf32(const UTF8 *utf8_word)
 
 /*===========================================================================
 
+  compute_glyphs_lines
+
+  Computes a sequence of lines containing glyphs, taking into account the
+  specified boundary, so:
+  1. If the text overflows the boundary width, creates the required new lines.
+  2. If the text overflows the boundary height, the overflowed text will not
+     processed.
+
+  =========================================================================*/
+GlyphsLine* compute_glyph_lines(void* face, GlyphsBoundary glyphs_boundary, WordGlyphs *word_glyps, int word_count, int *out_line_count) {
+    // Width and height of the 'space' character in the current font face.
+    static const UTF32 utf32_space[2] = {' ', 0};
+    int space_x, space_y;
+	  face_get_string_extent(face, utf32_space, &space_x, &space_y);
+
+    // Height between lines in the current font face.
+    int line_spacing = face_get_line_spacing(face);
+
+    // Initial position (x, y) where the text will be placed.
+    int curr_x = glyphs_boundary.init_x;
+    int curr_y = glyphs_boundary.init_y;
+
+    // Allocate memory for storing words of an arbitrary line. Initially,
+    // allocate based on the total number of words; later, reallocate based on
+    // the actual number of words of the line.
+    UTF32 **words_in_curr_line = (UTF32**) malloc(word_count * sizeof(UTF32*));
+    if (!words_in_curr_line) {
+        return NULL;
+    }
+
+    // Counter tracking the number of words of an arbitrary line.
+    int curr_line_word_count = 0;
+
+    // Counter tracking the total number of displayable words.
+    int displayable_word_count = 0;
+
+    // Allocate memory for storing computed glyph lines. Initially, allocate
+    // based on the total number of words; later, reallocate based on the
+    // actual number of processed lines.
+    GlyphsLine *glyph_lines = (GlyphsLine*) malloc(word_count * sizeof(GlyphsLine));
+    if (!glyph_lines) {
+        free(words_in_curr_line);
+        return NULL;
+    }
+
+    // Counter keeping track of the number of computed lines.
+    int line_count = 0;
+
+    // Flag indicating if the end of an arbitrary line has been reached.
+    bool is_end_of_line = false;
+
+    // Flag indicating if there the height is overflowed.
+    bool height_is_overflowed = false;
+
+    for (int curr_word_idx = 0; curr_word_idx < word_count; curr_word_idx++) {
+        WordGlyphs curr_word_glyps = word_glyps[curr_word_idx];
+        int curr_word_x_extent = curr_word_glyps.x_extent;
+        int curr_word_x_advance = curr_word_x_extent + space_x;
+
+        log_debug("Word width is %d px; would advance 'x' position by %d.", curr_word_x_extent, curr_word_x_advance);
+
+        // If the current 'y' position exceeds the boundary height...
+        if (curr_y + line_spacing >= glyphs_boundary.init_y + glyphs_boundary.height) {
+            int remaining_word_count = word_count - displayable_word_count;
+            log_warning("No more space within the y-boundary. Omitting %d words...", remaining_word_count);
+
+            // Stop creating lines.
+            height_is_overflowed = true;
+            break;
+        }
+
+        // If the end of the line has been reached and at least one word has
+        // been written, then create a new line.
+        is_end_of_line = curr_x + curr_word_x_advance > glyphs_boundary.width;
+        if (is_end_of_line && curr_line_word_count > 0) {
+            log_debug("Text too large for bounds. Moving to the next line...");
+
+            words_in_curr_line = (UTF32**) realloc(words_in_curr_line, curr_line_word_count * sizeof(UTF32*));
+
+            // Add the sequence of glyphs as a current line.
+            glyph_lines[line_count].word32 = words_in_curr_line;
+            glyph_lines[line_count].word_count = curr_line_word_count;
+            glyph_lines[line_count].y_position = curr_y;
+
+            displayable_word_count += curr_line_word_count;
+            curr_line_word_count = 0;
+            line_count++;
+            curr_x = glyphs_boundary.init_x;
+            curr_y += line_spacing;
+
+            // Allocate memory for storing words of an arbitrary line.
+            int remaining_word_count = word_count - displayable_word_count;
+            words_in_curr_line = (UTF32**) malloc((remaining_word_count) * sizeof(UTF32*));
+        }
+        words_in_curr_line[curr_line_word_count] = (curr_word_glyps.word32);
+        curr_line_word_count++;
+        curr_x += curr_word_x_advance;
+    }
+
+    // If boundary height wasn't overflowed, write the words of last line.
+    if (!height_is_overflowed) {
+        words_in_curr_line = (UTF32**) realloc(words_in_curr_line, curr_line_word_count * sizeof(UTF32*));
+        glyph_lines[line_count].word32 = words_in_curr_line;
+        glyph_lines[line_count].word_count = curr_line_word_count;
+        glyph_lines[line_count].y_position = curr_y;
+        line_count++;
+    } else {
+      free(words_in_curr_line);
+    }
+
+    // Resize to the actual number of renderable lines.
+    glyph_lines = (GlyphsLine*) realloc(glyph_lines, line_count * sizeof(GlyphsLine));
+
+    *out_line_count = line_count;
+
+    return glyph_lines;
+}
+
+/*===========================================================================
+
   draw_word_glyphs
 
   Draws a sequence of word glyphs onto the framebuffer. If the width of the
   text exceeds the specified bounds, creates a new line until all words have
   been written.
   =========================================================================*/
-void draw_word_glyphs(void *face, void *fb, int init_x, int init_y, int width, int height, int word_count, WordGlyphs *word_glyps) {
+void draw_word_glyphs(void *face, void *fb, GlyphsBoundary glyphs_boundary, int word_count, WordGlyphs *word_glyps) {
     // Let's work out how wide a single space is in the current face, so we
 	  // don't have to keep recalculating it.
 	  int space_y;
@@ -422,32 +566,26 @@ void draw_word_glyphs(void *face, void *fb, int init_x, int init_y, int width, i
     log_debug("Obtained a face whose space has height %d px", space_y);
 	  log_debug("Line spacing is %d px", face_get_line_spacing (face));
 
-	  // x and y are the current coordinates of the top-left corner of the
-	  // bounding box of the text being written, relative to the TL corner of the
-	  // screen.
-    int x = init_x;
-    int y = init_y;
-    log_debug("Starting drawing at %d,%d", x, y);
-    int line_spacing = face_get_line_spacing(face);
+    // Compute lines based on glyphs and the specified boundary.
+    int line_count;
+    GlyphsLine *glyph_lines = compute_glyph_lines(face, glyphs_boundary, word_glyps, word_count, &line_count);
 
-    for (int curr_word_idx = 0; curr_word_idx < word_count; curr_word_idx++) {
-        int x_extent = word_glyps[curr_word_idx].x_extent;
-        int x_advance = x_extent + space_x;
-        log_debug("Word width is %d px; would advance X position by %d", x_extent, x_advance);
+    // Draw the computed lines.
+    for (int curr_line_idx = 0; curr_line_idx < line_count; curr_line_idx++) {
+        GlyphsLine curr_glyph_line = glyph_lines[curr_line_idx];
 
-        // If the text won't fit, move down to the next line
-        if (x + x_advance > width) {
-            log_debug("Text too large for bounds -- move to next line");
-            x = init_x;
-            y += line_spacing;
+        int x = glyphs_boundary.init_x;
+        int y = curr_glyph_line.y_position;
+
+        log_debug("Drawing %d words in line %d at (%d,%d)...", curr_glyph_line.word_count, curr_line_idx + 1, x, y);
+
+        for (int curr_word_idx = 0; curr_word_idx < curr_glyph_line.word_count; curr_word_idx++) {
+            const UTF32 *curr_word = curr_glyph_line.word32[curr_word_idx];
+            face_draw_string_on_fb(face, fb, curr_word, &x, y);
+            face_draw_string_on_fb(face, fb, (UTF32 *)L" ", &x, y); // Single space in UTF32.
         }
-        // If we're already below the specified height, don't write anything.
-        if (y + line_spacing < init_y + height) {
-            face_draw_string_on_fb(face, fb, word_glyps[curr_word_idx].word32, &x, y);
-            face_draw_string_on_fb(face, fb, (UTF32 *)L" ", &x, y); // Single space in UTF32
-        }
-        free(word_glyps[curr_word_idx].word32);
     }
+    free(glyph_lines);
 }
 
 /*===========================================================================
@@ -650,8 +788,20 @@ int main (int argc, char **argv)
       curr_word_idx++;
     }
 
-    draw_word_glyphs(face, fb, init_x, init_y, width, height, word_count, word_glyps);
+    GlyphsBoundary glyphs_boundary;
+    glyphs_boundary.init_x = init_x;
+    glyphs_boundary.init_y = init_y;
+    glyphs_boundary.width = width;
+    glyphs_boundary.height = height;
+
+    draw_word_glyphs(face, fb, glyphs_boundary, word_count, word_glyps);
+
+    // Free memory.
+    for (int curr_glyph_idx = 0; curr_glyph_idx < word_count; curr_glyph_idx++) {
+      free(word_glyps[curr_glyph_idx].word32);
+    }
     free(word_glyps);
+
 	  done_ft (ft);
   }
 	else

@@ -65,6 +65,19 @@ typedef struct {
 } GlyphsBoundary;
 
 /*===========================================================================
+  TextAlignmentType
+
+  Alignment type for text to shown. TODO: 'Right' NOT implemented, yet!
+=========================================================================*/
+enum TextAlignmentType {
+    Left,
+    // Right,
+    Center
+};
+
+typedef enum TextAlignmentType TextAlignmentType;
+
+/*===========================================================================
 
   init_ft 
 
@@ -592,7 +605,7 @@ int compute_init_x_to_center_line(void *face, GlyphsLine *glyph_line, GlyphsBoun
   text exceeds the specified bounds, creates a new line until all words have
   been written.
   =========================================================================*/
-void draw_word_glyphs(void *face, void *fb, GlyphsBoundary glyphs_boundary, int word_count, WordGlyphs *word_glyps) {
+void draw_word_glyphs(void *face, void *fb, TextAlignmentType text_alignment, GlyphsBoundary glyphs_boundary, int word_count, WordGlyphs *word_glyps) {
     // Let's work out how wide a single space is in the current face, so we
 	  // don't have to keep recalculating it.
 	  int space_y;
@@ -614,7 +627,7 @@ void draw_word_glyphs(void *face, void *fb, GlyphsBoundary glyphs_boundary, int 
         GlyphsLine *curr_glyph_line = &glyph_lines[curr_line_idx];
 
         int x = glyphs_boundary.init_x;
-        if (true) {
+        if (text_alignment == Center) {
             x = compute_init_x_to_center_line(face, curr_glyph_line, glyphs_boundary);
             log_debug("Centering line in x=%d...", x);
         }
@@ -629,6 +642,25 @@ void draw_word_glyphs(void *face, void *fb, GlyphsBoundary glyphs_boundary, int 
         }
     }
     free(glyph_lines);
+}
+
+/*===========================================================================
+  parse_alignment
+
+  Parses a string representing a type of an alignment. Then, returns the
+  corresponding enum value. If cannot parse, returns 'Left' as default.
+  =========================================================================*/
+TextAlignmentType parse_alignment(char *string_type) {
+    if (strcmp(string_type, "left") == 0) {
+        return Left;
+    } /*else if (strcmp(alignment_to_parse, "right") == 0) {
+        return Right;
+    }*/ else if (strcmp(string_type, "center") == 0) {
+        return Center;
+    }
+
+    // Return default case: align to left.
+    return Left;
 }
 
 /*===========================================================================
@@ -668,6 +700,7 @@ int main (int argc, char **argv)
   int width = 500;
   int height = 500;
   int font_size = 20;
+  TextAlignmentType text_alignment = Left;
   BOOL show_usage = FALSE;
   BOOL show_version = FALSE;
   BOOL clear = FALSE;
@@ -688,6 +721,7 @@ int main (int argc, char **argv)
       {"y", required_argument, NULL, 'y'},
       {"width", required_argument, NULL, 'w'},
       {"height", required_argument, NULL, 'h'},
+      {"alignment", required_argument, NULL, 'a'},
       {0, 0, 0, 0}
     };
 
@@ -701,7 +735,7 @@ int main (int argc, char **argv)
    while (ret)
      {
      int option_index = 0;
-     opt = getopt_long (argc, argv, "c?vl:f:x:y:w:h:d:",
+     opt = getopt_long (argc, argv, "c?vl:f:x:y:w:h:d:a:",
      long_options, &option_index);
 
      if (opt == -1) break;
@@ -729,6 +763,8 @@ int main (int argc, char **argv)
            init_y = atoi (optarg); 
          else if (strcmp (long_options[option_index].name, "dev") == 0)
            { free (fbdev); fbdev = strdup (optarg); } 
+         else if (strcmp (long_options[option_index].name, "alignment") == 0)
+            text_alignment = parse_alignment(optarg);
          else
            exit (-1);
          break;
@@ -752,6 +788,8 @@ int main (int argc, char **argv)
            init_y = atoi (optarg); break;
        case 'd': 
            free (fbdev); fbdev = strdup (optarg); break;
+       case 'a':
+           text_alignment = parse_alignment(optarg); break;
        default:
          ret = FALSE; 
        }
@@ -837,7 +875,7 @@ int main (int argc, char **argv)
     glyphs_boundary.width = width;
     glyphs_boundary.height = height;
 
-    draw_word_glyphs(face, fb, glyphs_boundary, word_count, word_glyps);
+    draw_word_glyphs(face, fb, text_alignment, glyphs_boundary, word_count, word_glyps);
 
     // Free memory.
     for (int curr_glyph_idx = 0; curr_glyph_idx < word_count; curr_glyph_idx++) {

@@ -449,15 +449,7 @@ UTF32 *utf8_to_utf32(const UTF8 *utf8_word)
      processed.
 
   =========================================================================*/
-GlyphsLine* compute_glyph_lines(void* face, GlyphsBoundary glyphs_boundary, WordGlyphs *word_glyps, int word_count, int *out_line_count) {
-    // Width and height of the 'space' character in the current font face.
-    static const UTF32 utf32_space[2] = {' ', 0};
-    int space_x, space_y;
-	  face_get_string_extent(face, utf32_space, &space_x, &space_y);
-
-    // Height between lines in the current font face.
-    int line_spacing = face_get_line_spacing(face);
-
+GlyphsLine* compute_glyph_lines(int space_x_entent, int line_spacing, GlyphsBoundary glyphs_boundary, WordGlyphs *word_glyps, int word_count, int *out_line_count) {
     // Initial position (x, y) where the text will be placed.
     int curr_x = glyphs_boundary.init_x;
     int curr_y = glyphs_boundary.init_y;
@@ -497,7 +489,7 @@ GlyphsLine* compute_glyph_lines(void* face, GlyphsBoundary glyphs_boundary, Word
     for (int curr_word_idx = 0; curr_word_idx < word_count; curr_word_idx++) {
         WordGlyphs curr_word_glyps = word_glyps[curr_word_idx];
         int curr_word_x_extent = curr_word_glyps.x_extent;
-        int curr_word_x_advance = curr_word_x_extent + space_x;
+        int curr_word_x_advance = curr_word_x_extent + space_x_entent;
 
         log_debug("Word width is %d px; would advance 'x' position by %d.", curr_word_x_extent, curr_word_x_advance);
 
@@ -566,18 +558,12 @@ GlyphsLine* compute_glyph_lines(void* face, GlyphsBoundary glyphs_boundary, Word
   the glyphs boundary.
 
   =========================================================================*/
-int compute_init_x_to_center_line(void *face, GlyphsLine *glyph_line, GlyphsBoundary glyphs_boundary) {
-    // Width and height of the 'space' character in the current font face.
-    // TODO: pass 'space_x' (as 'space_width'), avoiding this computation.
-    static const UTF32 utf32_space[2] = {' ', 0};
-    int space_x, space_y;
-	  face_get_string_extent(face, utf32_space, &space_x, &space_y);
-
+int compute_init_x_to_center_line(int space_x_entent, GlyphsLine *glyph_line, GlyphsBoundary glyphs_boundary) {
     int word_count = glyph_line->word_count;
     int line_width = 0;
 
     // Compute the width required for the space between glyphs.
-    line_width += ((word_count - 1) * space_x);
+    line_width += ((word_count - 1) * space_x_entent);
 
     // Compute the width required for the glyphs.
     for (int curr_glyph_idx = 0; curr_glyph_idx < word_count; curr_glyph_idx++) {
@@ -603,19 +589,20 @@ int compute_init_x_to_center_line(void *face, GlyphsLine *glyph_line, GlyphsBoun
 void draw_word_glyphs(void *face, void *fb, TextAlignmentType text_alignment, GlyphsBoundary glyphs_boundary, int word_count, WordGlyphs *word_glyps) {
     // Let's work out how wide a single space is in the current face, so we
 	  // don't have to keep recalculating it.
-	  int space_y;
-	  int space_x; // Pixel width of a space
+	  int space_y_extent;
+	  int space_x_entent;
 
     // A string representating a single space in UTF32 format.
     static const UTF32 utf32_space[2] = {' ', 0};
-	  face_get_string_extent(face, utf32_space, &space_x, &space_y);
+	  face_get_string_extent(face, utf32_space, &space_x_entent, &space_y_extent);
 
-    log_debug("Obtained a face whose space has height %d px", space_y);
-	  log_debug("Line spacing is %d px", face_get_line_spacing (face));
+    int line_spacing = face_get_line_spacing (face);
+    log_debug("Obtained a face whose space has height %d px", space_y_extent);
+	  log_debug("Line spacing is %d px", line_spacing);
 
     // Compute lines based on glyphs and the specified boundary.
     int line_count;
-    GlyphsLine *glyph_lines = compute_glyph_lines(face, glyphs_boundary, word_glyps, word_count, &line_count);
+    GlyphsLine *glyph_lines = compute_glyph_lines(space_x_entent, line_spacing, glyphs_boundary, word_glyps, word_count, &line_count);
 
     // Draw the computed lines.
     for (int curr_line_idx = 0; curr_line_idx < line_count; curr_line_idx++) {
@@ -623,7 +610,7 @@ void draw_word_glyphs(void *face, void *fb, TextAlignmentType text_alignment, Gl
 
         int x = glyphs_boundary.init_x;
         if (text_alignment == Center) {
-            x = compute_init_x_to_center_line(face, curr_glyph_line, glyphs_boundary);
+            x = compute_init_x_to_center_line(space_x_entent, curr_glyph_line, glyphs_boundary);
             log_debug("Centering line in x=%d...", x);
         }
         int y = curr_glyph_line->y_position;

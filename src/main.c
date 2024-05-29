@@ -47,7 +47,7 @@ typedef struct {
   Structure to contain a sequence of glyphs belonging to a line.
 =========================================================================*/
 typedef struct {
-    UTF32 **word32;
+    WordGlyphs *word_glyphs;
     int y_position;
     int word_count;
 } GlyphsLine;
@@ -465,7 +465,7 @@ GlyphsLine* compute_glyph_lines(void* face, GlyphsBoundary glyphs_boundary, Word
     // Allocate memory for storing words of an arbitrary line. Initially,
     // allocate based on the total number of words; later, reallocate based on
     // the actual number of words of the line.
-    UTF32 **words_in_curr_line = (UTF32**) malloc(word_count * sizeof(UTF32*));
+    WordGlyphs *words_in_curr_line = (WordGlyphs*) malloc(word_count * sizeof(WordGlyphs));
     if (!words_in_curr_line) {
         return NULL;
     }
@@ -517,10 +517,10 @@ GlyphsLine* compute_glyph_lines(void* face, GlyphsBoundary glyphs_boundary, Word
         if (is_end_of_line && curr_line_word_count > 0) {
             log_debug("Text too large for bounds. Moving to the next line...");
 
-            words_in_curr_line = (UTF32**) realloc(words_in_curr_line, curr_line_word_count * sizeof(UTF32*));
+            words_in_curr_line = (WordGlyphs*) realloc(words_in_curr_line, curr_line_word_count * sizeof(WordGlyphs));
 
             // Add the sequence of glyphs as a current line.
-            glyph_lines[line_count].word32 = words_in_curr_line;
+            glyph_lines[line_count].word_glyphs = words_in_curr_line;
             glyph_lines[line_count].word_count = curr_line_word_count;
             glyph_lines[line_count].y_position = curr_y;
 
@@ -532,17 +532,17 @@ GlyphsLine* compute_glyph_lines(void* face, GlyphsBoundary glyphs_boundary, Word
 
             // Allocate memory for storing words of an arbitrary line.
             int remaining_word_count = word_count - displayable_word_count;
-            words_in_curr_line = (UTF32**) malloc((remaining_word_count) * sizeof(UTF32*));
+            words_in_curr_line = (WordGlyphs*) malloc((remaining_word_count) * sizeof(WordGlyphs));
         }
-        words_in_curr_line[curr_line_word_count] = (curr_word_glyps.word32);
+        words_in_curr_line[curr_line_word_count] = curr_word_glyps;
         curr_line_word_count++;
         curr_x += curr_word_x_advance;
     }
 
     // If boundary height wasn't overflowed, write the words of last line.
     if (!height_is_overflowed) {
-        words_in_curr_line = (UTF32**) realloc(words_in_curr_line, curr_line_word_count * sizeof(UTF32*));
-        glyph_lines[line_count].word32 = words_in_curr_line;
+        words_in_curr_line = (WordGlyphs*) realloc(words_in_curr_line, curr_line_word_count * sizeof(WordGlyphs));
+        glyph_lines[line_count].word_glyphs = words_in_curr_line;
         glyph_lines[line_count].word_count = curr_line_word_count;
         glyph_lines[line_count].y_position = curr_y;
         line_count++;
@@ -581,12 +581,7 @@ int compute_init_x_to_center_line(void *face, GlyphsLine *glyph_line, GlyphsBoun
 
     // Compute the width required for the glyphs.
     for (int curr_glyph_idx = 0; curr_glyph_idx < word_count; curr_glyph_idx++) {
-        int word_x, word_y;
-
-        // TODO: refactor 'glyph_line' to contain a sequence of 'WordGlyphs'
-        // instead of 'UTF32', avoiding computation.
-        face_get_string_extent(face, glyph_line->word32[curr_glyph_idx], &word_x, &word_y);
-        line_width += word_x;
+        line_width += glyph_line->word_glyphs[curr_glyph_idx].x_extent;
     }
 
     // Compute initial x-coordinate for centering.
@@ -636,7 +631,7 @@ void draw_word_glyphs(void *face, void *fb, TextAlignmentType text_alignment, Gl
         log_debug("Drawing %d words in line %d at (%d,%d)...", curr_glyph_line->word_count, curr_line_idx + 1, x, y);
 
         for (int curr_word_idx = 0; curr_word_idx < curr_glyph_line->word_count; curr_word_idx++) {
-            const UTF32 *curr_word = curr_glyph_line->word32[curr_word_idx];
+            const UTF32 *curr_word = curr_glyph_line->word_glyphs[curr_word_idx].word32;
             face_draw_string_on_fb(face, fb, curr_word, &x, y);
             face_draw_string_on_fb(face, fb, (UTF32 *)L" ", &x, y); // Single space in UTF32.
         }

@@ -454,10 +454,8 @@ GlyphsLine* compute_glyph_lines(int space_x_entent, int line_spacing, GlyphsBoun
     int curr_x = glyphs_boundary.init_x;
     int curr_y = glyphs_boundary.init_y;
 
-    // Allocate memory for storing words of an arbitrary line. Initially,
-    // allocate based on the total number of words; later, reallocate based on
-    // the actual number of words of the line.
-    WordGlyphs *words_in_curr_line = (WordGlyphs*) malloc(word_count * sizeof(WordGlyphs));
+    // Allocate memory for storing words of an arbitrary line.
+    WordGlyphs *words_in_curr_line = (WordGlyphs*) malloc(sizeof(WordGlyphs));
     if (!words_in_curr_line) {
         return NULL;
     }
@@ -507,8 +505,6 @@ GlyphsLine* compute_glyph_lines(int space_x_entent, int line_spacing, GlyphsBoun
         if (is_end_of_line && curr_line_word_count > 0) {
             log_debug("Text too large for bounds. Moving to the next line...");
 
-            words_in_curr_line = (WordGlyphs*) realloc(words_in_curr_line, curr_line_word_count * sizeof(WordGlyphs));
-
             // Add the sequence of glyphs as a current line.
             glyph_lines = (GlyphsLine*) realloc(glyph_lines, (line_count + 1) * sizeof(GlyphsLine));
             glyph_lines[line_count].word_glyphs = words_in_curr_line;
@@ -526,6 +522,7 @@ GlyphsLine* compute_glyph_lines(int space_x_entent, int line_spacing, GlyphsBoun
             int remaining_word_count = word_count - displayable_word_count;
             words_in_curr_line = (WordGlyphs*) malloc((remaining_word_count) * sizeof(WordGlyphs));
         }
+        words_in_curr_line = (WordGlyphs*) realloc(words_in_curr_line, (curr_line_word_count + 1) * sizeof(WordGlyphs));
         words_in_curr_line[curr_line_word_count] = curr_word_glyps;
         curr_line_word_count++;
         curr_x += curr_word_x_advance;

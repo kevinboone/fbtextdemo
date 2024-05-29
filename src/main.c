@@ -468,10 +468,8 @@ GlyphsLine* compute_glyph_lines(int space_x_entent, int line_spacing, GlyphsBoun
     // Counter tracking the total number of displayable words.
     int displayable_word_count = 0;
 
-    // Allocate memory for storing computed glyph lines. Initially, allocate
-    // based on the total number of words; later, reallocate based on the
-    // actual number of processed lines.
-    GlyphsLine *glyph_lines = (GlyphsLine*) malloc(word_count * sizeof(GlyphsLine));
+    // Allocate memory for storing computed glyph lines.
+    GlyphsLine *glyph_lines = (GlyphsLine*) malloc(sizeof(GlyphsLine));
     if (!glyph_lines) {
         free(words_in_curr_line);
         return NULL;
@@ -512,6 +510,7 @@ GlyphsLine* compute_glyph_lines(int space_x_entent, int line_spacing, GlyphsBoun
             words_in_curr_line = (WordGlyphs*) realloc(words_in_curr_line, curr_line_word_count * sizeof(WordGlyphs));
 
             // Add the sequence of glyphs as a current line.
+            glyph_lines = (GlyphsLine*) realloc(glyph_lines, (line_count + 1) * sizeof(GlyphsLine));
             glyph_lines[line_count].word_glyphs = words_in_curr_line;
             glyph_lines[line_count].word_count = curr_line_word_count;
             glyph_lines[line_count].y_position = curr_y;
@@ -519,6 +518,7 @@ GlyphsLine* compute_glyph_lines(int space_x_entent, int line_spacing, GlyphsBoun
             displayable_word_count += curr_line_word_count;
             curr_line_word_count = 0;
             line_count++;
+
             curr_x = glyphs_boundary.init_x;
             curr_y += line_spacing;
 
@@ -534,6 +534,8 @@ GlyphsLine* compute_glyph_lines(int space_x_entent, int line_spacing, GlyphsBoun
     // If boundary height wasn't overflowed, write the words of last line.
     if (!height_is_overflowed) {
         words_in_curr_line = (WordGlyphs*) realloc(words_in_curr_line, curr_line_word_count * sizeof(WordGlyphs));
+
+        glyph_lines = (GlyphsLine*) realloc(glyph_lines, (line_count + 1) * sizeof(GlyphsLine));
         glyph_lines[line_count].word_glyphs = words_in_curr_line;
         glyph_lines[line_count].word_count = curr_line_word_count;
         glyph_lines[line_count].y_position = curr_y;
@@ -542,7 +544,6 @@ GlyphsLine* compute_glyph_lines(int space_x_entent, int line_spacing, GlyphsBoun
       free(words_in_curr_line);
     }
 
-    // Resize to the actual number of renderable lines.
     glyph_lines = (GlyphsLine*) realloc(glyph_lines, line_count * sizeof(GlyphsLine));
 
     *out_line_count = line_count;

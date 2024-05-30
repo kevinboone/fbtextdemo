@@ -19,6 +19,7 @@
   =========================================================================*/
 #include <stdio.h>
 #include <assert.h>
+#include <stdbool.h>
 #include <freetype2/ft2build.h>
 #include <freetype/freetype.h>
 #include <getopt.h>
@@ -27,6 +28,54 @@
 #include "framebuffer.h"
 
 #define FBDEV "/dev/fb0"
+
+
+/*===========================================================================
+  WordGlyphs
+
+  Structure to contain a word represented as its glyphs.
+=========================================================================*/
+typedef struct {
+    UTF32 *word32;
+    int x_extent;
+    int y_extent;
+} WordGlyphs;
+
+/*===========================================================================
+  GlyphsLine
+
+  Structure to contain a sequence of glyphs belonging to a line.
+=========================================================================*/
+typedef struct {
+    WordGlyphs *word_glyphs;
+    int y_position;
+    int word_count;
+} GlyphsLine;
+
+/*===========================================================================
+  GlyphsBoundary
+
+  Structure representing the boundary of a group of glyphs.
+=========================================================================*/
+typedef struct {
+    int init_x;
+    int init_y;
+    int width;
+    int height;
+} GlyphsBoundary;
+
+/*===========================================================================
+  TextAlignmentType
+
+  Alignment type for text to shown. TODO: 'Right' NOT implemented, yet!
+=========================================================================*/
+enum TextAlignmentType {
+    Left,
+    // Right,
+    Center
+};
+
+typedef enum TextAlignmentType TextAlignmentType;
 
 /*===========================================================================
 
@@ -391,6 +440,211 @@ UTF32 *utf8_to_utf32(const UTF8 *utf8_word)
 
 /*===========================================================================
 
+  compute_glyphs_lines
+
+  Computes a sequence of lines containing glyphs, taking into account the
+  specified boundary, so:
+  1. If the text overflows the boundary width, creates the required new lines.
+  2. If the text overflows the boundary height, the overflowed text will not
+     processed.
+
+  =========================================================================*/
+GlyphsLine* compute_glyph_lines(int space_x_entent, int line_spacing, GlyphsBoundary glyphs_boundary, WordGlyphs *word_glyps, int word_count, int *out_line_count) {
+    // Initial position (x, y) where the text will be placed.
+    int curr_x = glyphs_boundary.init_x;
+    int curr_y = glyphs_boundary.init_y;
+
+    // Allocate memory for storing words of an arbitrary line.
+    WordGlyphs *words_in_curr_line = (WordGlyphs*) malloc(sizeof(WordGlyphs));
+    if (!words_in_curr_line) {
+        return NULL;
+    }
+
+    // Counter tracking the number of words of an arbitrary line.
+    int curr_line_word_count = 0;
+
+    // Counter tracking the total number of displayable words.
+    int displayable_word_count = 0;
+
+    // Allocate memory for storing computed glyph lines.
+    GlyphsLine *glyph_lines = (GlyphsLine*) malloc(sizeof(GlyphsLine));
+    if (!glyph_lines) {
+        free(words_in_curr_line);
+        return NULL;
+    }
+
+    // Counter keeping track of the number of computed lines.
+    int line_count = 0;
+
+    // Flag indicating if the end of an arbitrary line has been reached.
+    bool is_end_of_line = false;
+
+    // Flag indicating if there the height is overflowed.
+    bool height_is_overflowed = false;
+
+    for (int curr_word_idx = 0; curr_word_idx < word_count; curr_word_idx++) {
+        WordGlyphs curr_word_glyps = word_glyps[curr_word_idx];
+        int curr_word_x_extent = curr_word_glyps.x_extent;
+        int curr_word_x_advance = curr_word_x_extent + space_x_entent;
+
+        log_debug("Word width is %d px; would advance 'x' position by %d.", curr_word_x_extent, curr_word_x_advance);
+
+        // If the current 'y' position exceeds the boundary height...
+        if (curr_y + line_spacing >= glyphs_boundary.init_y + glyphs_boundary.height) {
+            int remaining_word_count = word_count - displayable_word_count;
+            log_warning("No more space within the y-boundary. Omitting %d words...", remaining_word_count);
+
+            // Stop creating lines.
+            height_is_overflowed = true;
+            break;
+        }
+
+        // If the end of the line has been reached and at least one word has
+        // been written, then create a new line.
+        is_end_of_line = curr_x + curr_word_x_advance > glyphs_boundary.width;
+        if (is_end_of_line && curr_line_word_count > 0) {
+            log_debug("Text too large for bounds. Moving to the next line...");
+
+            // Add the sequence of glyphs as a current line.
+            glyph_lines = (GlyphsLine*) realloc(glyph_lines, (line_count + 1) * sizeof(GlyphsLine));
+            glyph_lines[line_count].word_glyphs = words_in_curr_line;
+            glyph_lines[line_count].word_count = curr_line_word_count;
+            glyph_lines[line_count].y_position = curr_y;
+
+            displayable_word_count += curr_line_word_count;
+            curr_line_word_count = 0;
+            line_count++;
+
+            curr_x = glyphs_boundary.init_x;
+            curr_y += line_spacing;
+
+            // Allocate memory for storing words of an arbitrary line.
+            int remaining_word_count = word_count - displayable_word_count;
+            words_in_curr_line = (WordGlyphs*) malloc((remaining_word_count) * sizeof(WordGlyphs));
+        }
+        words_in_curr_line = (WordGlyphs*) realloc(words_in_curr_line, (curr_line_word_count + 1) * sizeof(WordGlyphs));
+        words_in_curr_line[curr_line_word_count] = curr_word_glyps;
+        curr_line_word_count++;
+        curr_x += curr_word_x_advance;
+    }
+
+    // If boundary height wasn't overflowed, write the words of last line.
+    if (!height_is_overflowed) {
+        words_in_curr_line = (WordGlyphs*) realloc(words_in_curr_line, curr_line_word_count * sizeof(WordGlyphs));
+
+        glyph_lines = (GlyphsLine*) realloc(glyph_lines, (line_count + 1) * sizeof(GlyphsLine));
+        glyph_lines[line_count].word_glyphs = words_in_curr_line;
+        glyph_lines[line_count].word_count = curr_line_word_count;
+        glyph_lines[line_count].y_position = curr_y;
+        line_count++;
+    } else {
+      free(words_in_curr_line);
+    }
+
+    glyph_lines = (GlyphsLine*) realloc(glyph_lines, line_count * sizeof(GlyphsLine));
+
+    *out_line_count = line_count;
+
+    return glyph_lines;
+}
+
+/*===========================================================================
+
+  compute_init_x_to_center_line
+
+  Computes the required 'init x' position to center a line within the x-axis of
+  the glyphs boundary.
+
+  =========================================================================*/
+int compute_init_x_to_center_line(int space_x_entent, GlyphsLine *glyph_line, GlyphsBoundary glyphs_boundary) {
+    int word_count = glyph_line->word_count;
+    int line_width = 0;
+
+    // Compute the width required for the space between glyphs.
+    line_width += ((word_count - 1) * space_x_entent);
+
+    // Compute the width required for the glyphs.
+    for (int curr_glyph_idx = 0; curr_glyph_idx < word_count; curr_glyph_idx++) {
+        line_width += glyph_line->word_glyphs[curr_glyph_idx].x_extent;
+    }
+
+    // Compute initial x-coordinate for centering.
+    int middle_x = (glyphs_boundary.width / 2);
+    int middle_line = (line_width / 2);
+    int init_x = (middle_x - middle_line) + glyphs_boundary.init_x;
+
+    return init_x;
+}
+
+/*===========================================================================
+
+  draw_word_glyphs
+
+  Draws a sequence of word glyphs onto the framebuffer. If the width of the
+  text exceeds the specified bounds, creates a new line until all words have
+  been written.
+  =========================================================================*/
+void draw_word_glyphs(void *face, void *fb, TextAlignmentType text_alignment, GlyphsBoundary glyphs_boundary, int word_count, WordGlyphs *word_glyps) {
+    // Let's work out how wide a single space is in the current face, so we
+	  // don't have to keep recalculating it.
+	  int space_y_extent;
+	  int space_x_entent;
+
+    // A string representating a single space in UTF32 format.
+    static const UTF32 utf32_space[2] = {' ', 0};
+	  face_get_string_extent(face, utf32_space, &space_x_entent, &space_y_extent);
+
+    int line_spacing = face_get_line_spacing (face);
+    log_debug("Obtained a face whose space has height %d px", space_y_extent);
+	  log_debug("Line spacing is %d px", line_spacing);
+
+    // Compute lines based on glyphs and the specified boundary.
+    int line_count;
+    GlyphsLine *glyph_lines = compute_glyph_lines(space_x_entent, line_spacing, glyphs_boundary, word_glyps, word_count, &line_count);
+
+    // Draw the computed lines.
+    for (int curr_line_idx = 0; curr_line_idx < line_count; curr_line_idx++) {
+        GlyphsLine *curr_glyph_line = &glyph_lines[curr_line_idx];
+
+        int x = glyphs_boundary.init_x;
+        if (text_alignment == Center) {
+            x = compute_init_x_to_center_line(space_x_entent, curr_glyph_line, glyphs_boundary);
+            log_debug("Centering line in x=%d...", x);
+        }
+        int y = curr_glyph_line->y_position;
+
+        log_debug("Drawing %d words in line %d at (%d,%d)...", curr_glyph_line->word_count, curr_line_idx + 1, x, y);
+
+        for (int curr_word_idx = 0; curr_word_idx < curr_glyph_line->word_count; curr_word_idx++) {
+            const UTF32 *curr_word = curr_glyph_line->word_glyphs[curr_word_idx].word32;
+            face_draw_string_on_fb(face, fb, curr_word, &x, y);
+            face_draw_string_on_fb(face, fb, (UTF32 *)L" ", &x, y); // Single space in UTF32.
+        }
+    }
+    free(glyph_lines);
+}
+
+/*===========================================================================
+  parse_alignment
+
+  Parses a string representing a type of an alignment. Then, returns the
+  corresponding enum value. If cannot parse, returns 'Left' as default.
+  =========================================================================*/
+TextAlignmentType parse_alignment(char *string_type) {
+    if (strcmp(string_type, "left") == 0) {
+        return Left;
+    } /*else if (strcmp(alignment_to_parse, "right") == 0) {
+        return Right;
+    }*/ else if (strcmp(string_type, "center") == 0) {
+        return Center;
+    }
+
+    // Return default case: align to left.
+    return Left;
+}
+
+/*===========================================================================
+
   usage
 
   Show a usage message
@@ -419,9 +673,6 @@ void usage (const char *argv0)
   =========================================================================*/
 int main (int argc, char **argv)
   {
-  // A string representating a single space in UTF32 format
-  static const UTF32 utf32_space[2] = {' ', 0};
-
   // Variables set from the command line
 
   int init_x = 5;
@@ -429,6 +680,7 @@ int main (int argc, char **argv)
   int width = 500;
   int height = 500;
   int font_size = 20;
+  TextAlignmentType text_alignment = Left;
   BOOL show_usage = FALSE;
   BOOL show_version = FALSE;
   BOOL clear = FALSE;
@@ -449,6 +701,7 @@ int main (int argc, char **argv)
       {"y", required_argument, NULL, 'y'},
       {"width", required_argument, NULL, 'w'},
       {"height", required_argument, NULL, 'h'},
+      {"alignment", required_argument, NULL, 'a'},
       {0, 0, 0, 0}
     };
 
@@ -462,7 +715,7 @@ int main (int argc, char **argv)
    while (ret)
      {
      int option_index = 0;
-     opt = getopt_long (argc, argv, "c?vl:f:x:y:w:h:d:",
+     opt = getopt_long (argc, argv, "c?vl:f:x:y:w:h:d:a:",
      long_options, &option_index);
 
      if (opt == -1) break;
@@ -490,6 +743,8 @@ int main (int argc, char **argv)
            init_y = atoi (optarg); 
          else if (strcmp (long_options[option_index].name, "dev") == 0)
            { free (fbdev); fbdev = strdup (optarg); } 
+         else if (strcmp (long_options[option_index].name, "alignment") == 0)
+            text_alignment = parse_alignment(optarg);
          else
            exit (-1);
          break;
@@ -513,6 +768,8 @@ int main (int argc, char **argv)
            init_y = atoi (optarg); break;
        case 'd': 
            free (fbdev); fbdev = strdup (optarg); break;
+       case 'a':
+           text_alignment = parse_alignment(optarg); break;
        default:
          ret = FALSE; 
        }
@@ -561,60 +818,53 @@ int main (int argc, char **argv)
 	  if (clear)
 	    framebuffer_clear (fb);
 
-	  // Let's work out how wide a single space is in the current face, so we
-	  //  don't have to keep recalculating it.
-	  int space_y;
-	  int space_x; // Pixel width of a space
-	  face_get_string_extent (face, utf32_space, &space_x, &space_y); 
-
-          log_debug ("Obtained a face whose space has height %d px", space_y);
-	  log_debug ("Line spacing is %d px", face_get_line_spacing (face));
-
-	  // x and y are the current coordinates of the top-left corner of
-	  //  the bounding box of the text being written, relative to the
-	  //  TL corner of the screen.
-	  int x = init_x;
-	  int y = init_y;
-
-          log_debug ("Starting drawing at %d,%d", x, y);
-	  int line_spacing = face_get_line_spacing (face);
+    // Allocate memory for the array of word as glyphs.
+    int word_count = argc - (optind + 1);
+    WordGlyphs *word_glyps = (WordGlyphs *)malloc(word_count * sizeof(WordGlyphs));
+    if (word_glyps == NULL) {
+        fprintf(stderr, "Cannot allocate memory for the word glyps.\n");
+        return 1;
+    }
 
 	  // Loop around the remaining arguments to the program, printing
 	  //  each word, followed by a space.
-	  for (int i = optind + 1; i < argc; i++)
-	    {
+	  int curr_word_idx = 0;
+    for (int i = optind + 1; i < argc; i++) {
 	    const char *word = argv[i];
             log_debug ("Next word is %s", word);
 
 	    // The face_xxx text handling functions take UTF32 character strings
-	    //  as input.
-	    UTF32 *word32 = utf8_to_utf32 ((UTF8 *)word);
+	    // as input.
+	    UTF32 *word32 = utf8_to_utf32((UTF8 *)word);
 	    
 	    // Get the extent of the bounding box of this word, to see 
-	    //  if it will fit in the specified width.
+	    // if it will fit in the specified width.
 	    int x_extent, y_extent;
-	    face_get_string_extent (face, word32, &x_extent, &y_extent); 
-	    int x_advance = x_extent + space_x;
-            log_debug ("Word width is %d px; would advance X position by %d", x_extent, x_advance);
+	    face_get_string_extent(face, word32, &x_extent, &y_extent);
 
-	    // If the text won't fit, move down to the next line
-	    if (x + x_advance > width) 
-	      {
-              log_debug ("Text too large for bonuds -- move to next line");
-	      x = init_x; 
-	      y += line_spacing;
-	      }
-	    // If we're already below the specified height, don't write anything
-	    if (y + line_spacing < init_y + height)
-	      {
-	      face_draw_string_on_fb (face, fb, word32, &x, y);
-	      face_draw_string_on_fb (face, fb, utf32_space, &x, y);
-	      }
-	    free (word32);
-	    }
+      // Save the word32 and extents in the structure
+      word_glyps[curr_word_idx].word32 = word32;
+      word_glyps[curr_word_idx].x_extent = x_extent;
+      word_glyps[curr_word_idx].y_extent = y_extent;
+      curr_word_idx++;
+    }
+
+    GlyphsBoundary glyphs_boundary;
+    glyphs_boundary.init_x = init_x;
+    glyphs_boundary.init_y = init_y;
+    glyphs_boundary.width = width;
+    glyphs_boundary.height = height;
+
+    draw_word_glyphs(face, fb, text_alignment, glyphs_boundary, word_count, word_glyps);
+
+    // Free memory.
+    for (int curr_glyph_idx = 0; curr_glyph_idx < word_count; curr_glyph_idx++) {
+      free(word_glyps[curr_glyph_idx].word32);
+    }
+    free(word_glyps);
 
 	  done_ft (ft);
-	  }
+  }
 	else
 	  {
 	  fprintf (stderr, "%s\n", error);

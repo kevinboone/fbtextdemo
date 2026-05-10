@@ -543,7 +543,7 @@ int main (int argc, char **argv)
     
       char *error = NULL;
 
-      FrameBuffer *fb = framebuffer_create (FBDEV);
+      FrameBuffer *fb = framebuffer_create (fbdev);
 
       // Initializing the framebuffer may fail, particularly if the user
       //   doesn't have permissions.

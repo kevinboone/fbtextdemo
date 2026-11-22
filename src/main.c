@@ -659,6 +659,7 @@ void usage (const char *argv0)
   fprintf (stderr, "  -d,--dev=device        framebuffer device (/dev/fb0)\n");
   fprintf (stderr, "  -f,--font-size=N       font height in pixels (20)\n");
   fprintf (stderr, "  -l,--log-level=[0..4]  log verbosity (0) \n");
+  fprintf (stderr, "  -r,--rotate=[0..3]     rotate 0, 1=90 CW, 2=180, 3=90 CCW (0)\n");
   fprintf (stderr, "  -h,--height=N          height of bounding box (500)\n");
   fprintf (stderr, "  -v,--version           show version\n");
   fprintf (stderr, "  -w,--width=N           width of bounding box (500)\n");
@@ -686,6 +687,7 @@ int main (int argc, char **argv)
   BOOL clear = FALSE;
   char *fbdev = strdup (FBDEV);
   int log_level = LOG_ERROR;
+  int rotate = 0;
 
   // Command line option table
 
@@ -701,6 +703,7 @@ int main (int argc, char **argv)
       {"y", required_argument, NULL, 'y'},
       {"width", required_argument, NULL, 'w'},
       {"height", required_argument, NULL, 'h'},
+      {"rotate", required_argument, NULL, 'r'},
       {"alignment", required_argument, NULL, 'a'},
       {0, 0, 0, 0}
     };
@@ -715,7 +718,7 @@ int main (int argc, char **argv)
    while (ret)
      {
      int option_index = 0;
-     opt = getopt_long (argc, argv, "c?vl:f:x:y:w:h:d:a:",
+     opt = getopt_long (argc, argv, "c?vl:f:x:y:w:h:d:a:r:",
      long_options, &option_index);
 
      if (opt == -1) break;
@@ -768,6 +771,8 @@ int main (int argc, char **argv)
            init_y = atoi (optarg); break;
        case 'd': 
            free (fbdev); fbdev = strdup (optarg); break;
+       case 'r':
+           rotate = atoi (optarg); break;
        case 'a':
            text_alignment = parse_alignment(optarg); break;
        default:
@@ -807,6 +812,7 @@ int main (int argc, char **argv)
       framebuffer_init (fb, &error);
       if (error == NULL)
 	{
+	framebuffer_set_rotation (fb, rotate);
         log_debug ("FB initialized OK");
 	// Initialize the FreeType library, and create a face of the specified
 	//  size.

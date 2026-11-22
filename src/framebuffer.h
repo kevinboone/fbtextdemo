@@ -49,6 +49,12 @@ void             framebuffer_destroy (FrameBuffer *self);
 void             framebuffer_set_pixel (FrameBuffer *self, int x,
                       int y, BYTE r, BYTE g, BYTE b);
 
+/** Set the display rotation: 0=none, 1=90 degrees clockwise, 2=180,
+    3=90 degrees counter-clockwise (same values as fbcon/rotate). All
+    pixel coordinates, and the width and height, are then in the
+    rotated coordinate system. */
+void             framebuffer_set_rotation (FrameBuffer *self, int rotate);
+
 /** Get the width of the framebuffer in pixels. The FB must be
     initialized first. */
 int              framebuffer_get_width (const FrameBuffer *self);

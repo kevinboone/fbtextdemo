@@ -52,6 +52,7 @@ struct _FrameBuffer
   int line_length; // Number of pixels in a line, as reported by the device
   int stride; // Bytes between vertically-adjacent rows of pixels
   int slop; // Amount of line_length that does not correspond to pixels.
+  int rotate; // 0=none, 1=90 CW, 2=180, 3=90 CCW (same as fbcon/rotate)
   }; 
 
 
@@ -66,6 +67,7 @@ FrameBuffer *framebuffer_create (const char *fbdev)
   self->fd = -1;
   self->fb_data = NULL;
   self->fb_data_size = 0;
+  self->rotate = 0;
   LOG_OUT 
   return self;
   }
@@ -98,14 +100,22 @@ BOOL framebuffer_init (FrameBuffer *self, char **error)
     int fb_bpp = vinfo.bits_per_pixel;
     int fb_bytes = fb_bpp / 8;
     self->fb_bytes = fb_bytes;
-    self->fb_data_size = self->w * self->h * fb_bytes;
     self->stride = max (self->line_length, self->w * self->fb_bytes);
     self->slop = self->stride - (self->w * self->fb_bytes);
+    // Rows may be padded, so map stride * height, not width * height
+    self->fb_data_size = self->stride * self->h;
 
     self->fb_data = mmap (0, self->fb_data_size, 
 	     PROT_READ | PROT_WRITE, MAP_SHARED, self->fd, (off_t)0);
 
-    ret = TRUE;
+    if (self->fb_data != MAP_FAILED)
+      ret = TRUE;
+    else
+      {
+      self->fb_data = NULL;
+      if (error)
+        asprintf (error, "Can't map framebuffer: %s", strerror (errno));
+      }
     }
   else
     {
@@ -150,12 +160,42 @@ void framebuffer_deinit (FrameBuffer *self)
 
 
 /*==========================================================================
+  framebuffer_set_rotation
+*==========================================================================*/
+void framebuffer_set_rotation (FrameBuffer *self, int rotate)
+  {
+  self->rotate = rotate & 3;
+  }
+
+/*==========================================================================
+  framebuffer_map
+  Convert logical (rotated) coordinates to physical framebuffer
+  coordinates. Returns FALSE if the point is off-screen.
+*==========================================================================*/
+static BOOL framebuffer_map (const FrameBuffer *self, int x, int y,
+      int *px, int *py)
+  {
+  switch (self->rotate)
+    {
+    case 1: // 90 degrees clockwise
+      *px = self->w - 1 - y; *py = x; break;
+    case 2: // 180 degrees
+      *px = self->w - 1 - x; *py = self->h - 1 - y; break;
+    case 3: // 90 degrees counter-clockwise
+      *px = y; *py = self->h - 1 - x; break;
+    default:
+      *px = x; *py = y;
+    }
+  return (*px >= 0 && *px < self->w && *py >= 0 && *py < self->h);
+  }
+
+/*==========================================================================
   framebuffer_set_pixel
 *==========================================================================*/
 void framebuffer_set_pixel (FrameBuffer *self, int x, int y, 
       BYTE r, BYTE g, BYTE b)
   {
-  if (x > 0 && x < self->w && y > 0 && y < self->h)
+  if (framebuffer_map (self, x, y, &x, &y))
     {
     int index32 = (y * self->w + x) * self->fb_bytes + y * self->slop;
     self->fb_data [index32++] = b;
@@ -185,7 +225,7 @@ void framebuffer_destroy (FrameBuffer *self)
 *==========================================================================*/
 int framebuffer_get_width (const FrameBuffer *self)
   {
-  return self->w;
+  return (self->rotate & 1) ? self->h : self->w;
   }
 
 /*==========================================================================
@@ -193,7 +233,7 @@ int framebuffer_get_width (const FrameBuffer *self)
 *==========================================================================*/
 int framebuffer_get_height (const FrameBuffer *self)
   {
-  return self->h;
+  return (self->rotate & 1) ? self->w : self->h;
   }
 
 /*==========================================================================
@@ -202,7 +242,7 @@ int framebuffer_get_height (const FrameBuffer *self)
 void framebuffer_get_pixel (const FrameBuffer *self, 
                       int x, int y, BYTE *r, BYTE *g, BYTE *b)
   {
-  if (x > 0 && x < self->w && y > 0 && y < self->h)
+  if (framebuffer_map (self, x, y, &x, &y))
     {
     int index32 = (y * self->w + x) * self->fb_bytes + (y * self->slop);
     *b = self->fb_data [index32++];

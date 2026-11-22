@@ -103,14 +103,18 @@ Show the version.
 Set the width of bounding box in pixels (default 500). Text will be
 broken at spaces to fit into this width.
 
--x=N                   
+`-x=N`
 
 X coordinate of upper-left corner of text output (default 5).
 
--y=N                   
+`-y=N`
 
 Y coordinate of upper-left corner of text output (default 5).
 
+`-a,--alignment=[left|center]`
+
+Set the text alignment according to the x-axis bounds (`-x` and
+`-w` options). The default alignment is to the left.
 
 ## Limitations
 
@@ -134,6 +138,9 @@ glyphs with an existing background, rather than simply overwriting it,
 If will prevent text overflowing the bounds in any direction. However,
 it won't stop you specifying a bounding rectangle that is not 
 on screen at all. 
+
+The text can be aligned to the left or the center of the x-axis bounds;
+however, alignment to the right is not yet implemented.
 
 ## Author and legal
 
